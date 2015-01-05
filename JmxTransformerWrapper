@@ -1,0 +1,114 @@
+package com.youku.java.xtrans.aspect;
+
+import org.apache.log4j.Logger;
+import org.aspectj.lang.JoinPoint;
+import org.aspectj.lang.annotation.AfterReturning;
+import org.aspectj.lang.annotation.Aspect;
+import org.springframework.beans.factory.InitializingBean;
+
+import com.google.inject.Guice;
+import com.google.inject.Injector;
+import com.googlecode.jmxtrans.cli.JmxTransConfiguration;
+import com.googlecode.jmxtrans.guice.JmxTransModule;
+import com.youku.java.xtrans.dao.CompositeDao;
+import com.youku.java.xtrans.dto.ConfigTemplateDto;
+import com.youku.java.xtrans.dto.QueryDto;
+import com.youku.java.xtrans.dto.ServerDto;
+import com.youku.java.xtrans.dto.WriterDto;
+import com.youku.java.xtrans.jmxtrans.JmxTransformerOnDB;
+
+@Aspect
+public class JmxTransformerWrapper implements InitializingBean{
+	private static final Logger log = Logger.getLogger(JmxTransformerWrapper.class);
+	private JmxTransConfiguration configuration;
+	private JmxTransformerOnDB jmxTransformerOnDB;
+	private CompositeDao compositeDao;
+	
+	@AfterReturning(value="execution(* com.youku.java.xtrans.aspect.IDBOperation.insertDto(..))", 
+			argNames="rtv", returning="rtv") 
+	public void afterInsertMethod(JoinPoint jp, Object rtv) {
+		boolean result = (Boolean)rtv;
+		if(result) {
+			try {
+				Object arg = jp.getArgs()[0];
+				if (arg instanceof ServerDto) {
+					jmxTransformerOnDB.serverAdded(compositeDao.getSingleServer((ServerDto)arg));
+					log.info("add a server.");
+				}
+			} catch (Exception e) {
+				log.error("jmxTransformerOnDB add error.", e);
+			}
+		}
+	}
+	
+	@AfterReturning(value="execution(* com.youku.java.xtrans.aspect.IDBOperation.updateDto(..))", 
+			argNames="rtv", returning="rtv") 
+	public void afterUpdateMethod(JoinPoint jp, Object rtv) {
+		boolean result = (Boolean)rtv;
+		if(result) {
+			try {
+				Object arg = jp.getArgs()[0];
+				if (arg instanceof ServerDto) {
+					jmxTransformerOnDB.serverModified(compositeDao.getSingleServer((ServerDto)arg));
+					log.info("jmxTransformerOnDB add a server.");
+				} else {
+					jmxTransformerOnDB.restartupSystem(compositeDao
+							.getAllRunningServers());
+					log.info("jmxTransformerOnDB restart.");
+				}
+			} catch (Exception e) {
+				log.error("jmxTransformerOnDB update error.", e);
+			}
+		}
+	}
+
+	@AfterReturning(value="execution(* com.youku.java.xtrans.aspect.IDBOperation.deleteDto(..))", 
+			argNames="rtv", returning="rtv") 
+	public void afterDeleteMethod(JoinPoint jp, Object rtv) {
+		boolean result = (Boolean)rtv;
+		if(result) {
+			try {
+				Object arg = jp.getArgs()[0];
+				if (arg instanceof ServerDto) {
+					//TODO 删除之后查询不到server
+					jmxTransformerOnDB.serverDeleted(compositeDao.getSingleServer((ServerDto)arg));
+					log.info("jmxTransformerOnDB add a server.");
+				} else {
+					jmxTransformerOnDB.restartupSystem(compositeDao
+							.getAllRunningServers());
+					log.info("jmxTransformerOnDB restart.");
+				}
+			} catch (Exception e) {
+				log.error("jmxTransformerOnDB detele error.", e);
+			}
+		}
+	}
+
+	public boolean isTransformerDto(Object arg) {
+		return arg instanceof ServerDto || arg instanceof ConfigTemplateDto
+				|| arg instanceof QueryDto || arg instanceof WriterDto;
+	}
+	
+	public void afterPropertiesSet() throws Exception {
+		Injector injector = Guice.createInjector(new JmxTransModule(configuration));
+		jmxTransformerOnDB = injector.getInstance(JmxTransformerOnDB.class);
+		jmxTransformerOnDB.doMain(compositeDao.getAllRunningServers());
+	}
+
+	public JmxTransConfiguration getConfiguration() {
+		return configuration;
+	}
+
+	public void setConfiguration(JmxTransConfiguration configuration) {
+		this.configuration = configuration;
+	}
+
+	public CompositeDao getCompositeDao() {
+		return compositeDao;
+	}
+
+	public void setCompositeDao(CompositeDao compositeDao) {
+		this.compositeDao = compositeDao;
+	}
+	
+}
